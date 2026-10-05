@@ -143,12 +143,17 @@ struct Answer {
     body: Vec<u8>,
     retry_after: Option<Duration>,
     replayed: bool,
+    /// The body was longer than `MAX_JSON_BYTES` and was not read.
+    too_large: bool,
 }
 
 #[derive(Clone, Copy, PartialEq)]
 enum Call {
     Read,
-    Create,
+    /// `POST /v1/uploads`: idempotent, not held.
+    Declare,
+    /// A job creation: idempotent and held by `Prefer: wait`.
+    Job,
 }
 
 pub struct Api {
@@ -156,6 +161,7 @@ pub struct Api {
     token: Option<String>,
     api: Agent,
     storage: Agent,
+    held_timeout: Duration,
     sleep: Sleep,
 }
 
@@ -245,8 +251,17 @@ impl Api {
             token,
             api: agent(API_TIMEOUT),
             storage: agent(STORAGE_TIMEOUT),
+            held_timeout: API_TIMEOUT + Duration::from_secs(WAIT_SECONDS),
             sleep: Arc::new(std::thread::sleep),
         })
+    }
+
+    /// Replaces the timeouts of API requests, held job creations and storage transfers (tests use short ones).
+    pub fn with_timeouts(mut self, api: Duration, held: Duration, storage: Duration) -> Api {
+        self.api = agent(api);
+        self.storage = agent(storage);
+        self.held_timeout = held;
+        self
     }
 
     /// Replaces the pause between retries and polls (tests record it instead of sleeping).
@@ -273,6 +288,7 @@ impl Api {
         path: &str,
         body: Option<&[u8]>,
         key: Option<&str>,
+        held: bool,
     ) -> Result<Answer, ureq::Error> {
         let url = format!("{}{path}", self.base);
         let auth = self.token.as_ref().map(|t| format!("Bearer {t}"));
@@ -289,19 +305,23 @@ impl Api {
                     .api
                     .post(&url)
                     .header("Accept", "application/json")
-                    .header("Content-Type", "application/json")
-                    .header("Prefer", format!("wait={WAIT_SECONDS}"));
+                    .header("Content-Type", "application/json");
                 if let Some(auth) = &auth {
                     request = request.header("Authorization", auth);
                 }
                 if let Some(key) = key {
                     request = request.header("Idempotency-Key", key);
                 }
-                request
-                    .config()
-                    .timeout_global(Some(API_TIMEOUT + Duration::from_secs(WAIT_SECONDS)))
-                    .build()
-                    .send(body)?
+                if held {
+                    request
+                        .header("Prefer", format!("wait={WAIT_SECONDS}"))
+                        .config()
+                        .timeout_global(Some(self.held_timeout))
+                        .build()
+                        .send(body)?
+                } else {
+                    request.send(body)?
+                }
             }
         };
         let status = response.status().as_u16();
@@ -311,32 +331,41 @@ impl Api {
             .get("idempotent-replayed")
             .and_then(|v| v.to_str().ok())
             .is_some_and(|v| v.eq_ignore_ascii_case("true"));
-        let body = response
+        let (body, too_large) = match response
             .body_mut()
             .with_config()
             .limit(MAX_JSON_BYTES)
-            .read_to_vec()?;
+            .read_to_vec()
+        {
+            Ok(body) => (body, false),
+            Err(ureq::Error::BodyExceedsLimit(_)) => (Vec::new(), true),
+            Err(e) => return Err(e),
+        };
         Ok(Answer {
             status,
             body,
             retry_after,
             replayed,
+            too_large,
         })
     }
 
     fn call(&self, path: &str, body: Option<&[u8]>, kind: Call) -> Result<Answer, ApiError> {
-        let key = (kind == Call::Create).then(|| uuid::Uuid::new_v4().to_string());
+        let key = (kind != Call::Read).then(|| uuid::Uuid::new_v4().to_string());
         let what = format!("the request to {path}");
         let (mut transport, mut busy) = (0, 0);
         loop {
-            match self.exchange(path, body, key.as_deref()) {
+            match self.exchange(path, body, key.as_deref(), kind == Call::Job) {
                 Err(e) => {
-                    let held = kind == Call::Create && matches!(e, ureq::Error::Timeout(_));
+                    let held = kind == Call::Job && matches!(e, ureq::Error::Timeout(_));
                     if held || transport >= RETRIES {
                         return Err(ApiError::transport(&what, &e));
                     }
                     transport += 1;
                     (self.sleep)(RETRY_STEP * transport);
+                }
+                Ok(a) if a.too_large && (200..300).contains(&a.status) => {
+                    return Err(ApiError::malformed(path));
                 }
                 Ok(a) if (200..300).contains(&a.status) => return Ok(a),
                 Ok(a) if kind == Call::Read && matches!(a.status, 429 | 503) && busy < RETRIES => {
@@ -355,18 +384,23 @@ impl Api {
         }
     }
 
-    fn create<B: Serialize + ?Sized>(&self, path: &str, body: &B) -> Result<Answer, ApiError> {
+    fn create<B: Serialize + ?Sized>(
+        &self,
+        path: &str,
+        body: &B,
+        kind: Call,
+    ) -> Result<Answer, ApiError> {
         let payload = serde_json::to_vec(body).map_err(|_| {
             ApiError::local(
                 MALFORMED_RESPONSE,
                 "the request body cannot be encoded".into(),
             )
         })?;
-        self.call(path, Some(&payload), Call::Create)
+        self.call(path, Some(&payload), kind)
     }
 
     fn create_job<B: Serialize + ?Sized>(&self, path: &str, body: &B) -> Result<Created, ApiError> {
-        let answer = self.create(path, body)?;
+        let answer = self.create(path, body, Call::Job)?;
         let job: Job = decode(&answer, path)?;
         let finished = answer.status == 200 && is_terminal(&job.state);
         Ok(Created { job, finished })
@@ -398,7 +432,7 @@ impl Api {
             sha256: sha256_hex(bytes),
             content_type,
         };
-        let answer = self.create("/v1/uploads", &body)?;
+        let answer = self.create("/v1/uploads", &body, Call::Declare)?;
         let mut ticket: Ticket = decode(&answer, "/v1/uploads")?;
         if ticket.upload_id.is_empty() || ticket.upload_url.is_empty() {
             return Err(ApiError::malformed("/v1/uploads"));
@@ -431,7 +465,7 @@ impl Api {
                 .send(bytes);
             let mut response = match sent {
                 Ok(r) => r,
-                Err(_) if attempt < RETRIES => {
+                Err(e) if attempt < RETRIES && !matches!(e, ureq::Error::Timeout(_)) => {
                     attempt += 1;
                     (self.sleep)(RETRY_STEP * attempt);
                     continue;
@@ -475,15 +509,34 @@ impl Api {
     }
 
     /// Polls the job until it is no longer queued or running, honouring `Retry-After` (else 1 s doubling to 5 s).
+    /// Busy answers (429/503) and transport failures keep it polling; any other non-2xx status ends it.
     pub fn wait_job(&self, id: &str) -> Result<Job, ApiError> {
         let path = format!("/v1/jobs/{}", escape(id));
         let mut delay = FIRST_POLL;
         loop {
-            let (job, answer): (Job, _) = self.read(&path)?;
-            if is_terminal(&job.state) {
-                return Ok(job);
-            }
-            (self.sleep)(answer.retry_after.unwrap_or(delay).max(FIRST_POLL));
+            let pause = match self.exchange(&path, None, None, false) {
+                Err(_) => delay,
+                Ok(a) if a.too_large && (200..300).contains(&a.status) => {
+                    return Err(ApiError::malformed(&path));
+                }
+                Ok(a) if (200..300).contains(&a.status) => {
+                    let job: Job = decode(&a, &path)?;
+                    if is_terminal(&job.state) {
+                        return Ok(job);
+                    }
+                    a.retry_after.unwrap_or(delay)
+                }
+                Ok(a) if matches!(a.status, 429 | 503) => a.retry_after.unwrap_or(delay),
+                Ok(a) => {
+                    return Err(ApiError::problem(
+                        a.status,
+                        &a.body,
+                        "the server",
+                        &self.secrets(""),
+                    ));
+                }
+            };
+            (self.sleep)(pause.max(FIRST_POLL));
             delay = (delay * 2).min(MAX_POLL);
         }
     }

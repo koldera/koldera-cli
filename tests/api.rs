@@ -684,3 +684,153 @@ fn validation_profile_and_status_default_when_missing() {
     assert_eq!((v.profile.as_str(), v.status.as_str()), ("", ""));
     let _: Value = serde_json::to_value(&v).unwrap();
 }
+
+#[test]
+fn api_redirects_are_not_followed() {
+    let server = TestServer::start();
+    let elsewhere = format!("{}/elsewhere", server.base);
+    server.on(
+        "GET /v1/jobs/x/findings",
+        Reply::status(307).header("Location", &elsewhere),
+    );
+    let (api, _) = api(&server);
+    let err = api.findings("x").unwrap_err();
+    assert_eq!(err.status, Some(307));
+    assert!(server.requests_to("GET /elsewhere").is_empty());
+    assert_eq!(server.requests().len(), 1);
+    assert_secret_free(&server, &err);
+}
+
+#[test]
+fn a_held_job_creation_that_times_out_is_not_repeated() {
+    let server = TestServer::start();
+    server.on("POST /v1/pdf/jobs", Reply::hang());
+    let (api, _) = api(&server);
+    let api = api.with_timeouts(
+        Duration::from_millis(200),
+        Duration::from_millis(300),
+        Duration::from_millis(200),
+    );
+    let err = api.create_pdf_job(&pdf_request()).unwrap_err();
+    assert_eq!((err.status, err.code.as_str()), (None, "TRANSPORT_ERROR"));
+    assert_eq!(server.requests_to("POST /v1/pdf/jobs").len(), 1);
+    assert_secret_free(&server, &err);
+}
+
+#[test]
+fn only_job_creations_ask_the_server_to_wait() {
+    let server = TestServer::start();
+    server.on("POST /v1/uploads", Reply::golden("upload-ticket-pdf"));
+    let (api, _) = api(&server);
+    api.create_upload("sample.pdf", "application/pdf", PDF)
+        .unwrap();
+    assert_eq!(server.requests()[0].header("prefer"), None);
+}
+
+#[test]
+fn an_upload_declaration_that_times_out_is_repeated_with_the_same_key() {
+    let server = TestServer::start();
+    server
+        .on("POST /v1/uploads", Reply::hang())
+        .on("POST /v1/uploads", Reply::golden("upload-ticket-pdf"));
+    let (api, _) = api(&server);
+    let api = api.with_timeouts(
+        Duration::from_millis(300),
+        Duration::from_millis(300),
+        Duration::from_millis(300),
+    );
+    api.create_upload("sample.pdf", "application/pdf", PDF)
+        .unwrap();
+    let posts = server.requests_to("POST /v1/uploads");
+    assert_eq!(posts.len(), 2);
+    assert_eq!(
+        posts[0].header("idempotency-key"),
+        posts[1].header("idempotency-key")
+    );
+}
+
+#[test]
+fn a_put_that_times_out_is_not_repeated() {
+    let server = TestServer::start();
+    server.on(PUT_ROUTE, Reply::hang());
+    let (api, _) = api(&server);
+    let api = api.with_timeouts(
+        Duration::from_millis(200),
+        Duration::from_millis(200),
+        Duration::from_millis(300),
+    );
+    let err = api.put_upload(&ticket(&server, false), PDF).unwrap_err();
+    assert_eq!((err.status, err.code.as_str()), (None, "TRANSPORT_ERROR"));
+    assert_eq!(server.requests_to(PUT_ROUTE).len(), 1);
+    assert_secret_free(&server, &err);
+}
+
+#[test]
+fn an_oversized_success_body_is_malformed_and_not_repeated() {
+    let server = TestServer::start();
+    let mut body = b"{\"items\":[] ".to_vec();
+    body.resize((16 << 20) + 16, b' ');
+    body.push(b'}');
+    server.on(
+        "GET /v1/jobs/x/findings",
+        Reply::status(200)
+            .header("Content-Type", "application/json")
+            .body(body),
+    );
+    let (api, _) = api(&server);
+    let err = api.findings("x").unwrap_err();
+    assert_eq!(err.code, "MALFORMED_RESPONSE");
+    assert_eq!(server.requests().len(), 1);
+}
+
+#[test]
+fn field_error_paths_are_redacted_too() {
+    let server = TestServer::start();
+    let problem = json!({
+        "type": "about:blank", "title": "Invalid", "status": 422, "code": "VALIDATION_ERROR",
+        "errors": [{"path": format!("/x/{TOKEN}"), "code": "C", "message": format!("m {TOKEN}")}]
+    });
+    server.on("POST /v1/documents/jobs", Reply::json(422, &problem));
+    let (api, _) = api(&server);
+    let err = api.create_document_job(&json!({})).unwrap_err();
+    assert_eq!(err.errors[0].path, "/x/***");
+    assert_eq!(err.errors[0].message, "m ***");
+}
+
+#[test]
+fn polling_keeps_going_through_busy_answers_and_transport_failures() {
+    let server = TestServer::start();
+    let route = format!("GET /v1/jobs/{JOB_ID}");
+    let busy = |status: u16| {
+        Reply::json(
+            status,
+            &json!({"type": "about:blank", "title": "Busy", "status": status, "code": "BUSY"}),
+        )
+    };
+    for _ in 0..5 {
+        server.on(&route, Reply::dropped());
+    }
+    server
+        .on(&route, busy(503).header("Retry-After", "7"))
+        .on(&route, busy(429))
+        .on(&route, busy(503))
+        .on(&route, busy(429))
+        .on(&route, Reply::golden("job-completed"));
+    let (api, sleeps) = api(&server);
+    let job = api.wait_job(JOB_ID).unwrap();
+    assert_eq!(job.state, "completed");
+    assert_eq!(server.requests_to(&route).len(), 10);
+    assert_eq!(slept(&sleeps), vec![1, 2, 4, 5, 5, 7, 5, 5, 5]);
+}
+
+#[test]
+fn polling_ends_on_a_status_that_is_not_retryable() {
+    let server = TestServer::start();
+    let route = format!("GET /v1/jobs/{JOB_ID}");
+    server
+        .on(&route, Reply::dropped())
+        .on(&route, Reply::golden("job-not-found"));
+    let (api, _) = api(&server);
+    let err = api.wait_job(JOB_ID).unwrap_err();
+    assert_eq!(err.status, Some(404));
+}
