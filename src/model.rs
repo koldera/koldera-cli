@@ -34,7 +34,9 @@ pub struct Job {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Validation {
+    #[serde(default)]
     pub profile: String,
+    #[serde(default)]
     pub status: String,
     #[serde(default)]
     pub failed_rules: Vec<FailedRule>,
@@ -79,7 +81,7 @@ pub struct Action {
     pub after: Option<String>,
 }
 
-/// An artifact record. `download_url` is a signed URL: it is a credential and never printed (see the Debug impl).
+/// An artifact record. `download_url` is a signed URL: a credential, never serialized or printed (see the Debug impl).
 #[derive(Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Artifact {
@@ -87,6 +89,7 @@ pub struct Artifact {
     pub kind: String,
     pub sha256: String,
     pub size_bytes: u64,
+    #[serde(skip_serializing)]
     pub download_url: String,
     #[serde(default)]
     pub expires_at: String,

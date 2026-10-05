@@ -82,7 +82,7 @@ pub fn write_artifacts(
 }
 
 fn verify(artifact: &Artifact, bytes: &[u8]) -> io::Result<()> {
-    let actual = hex(&Sha256::digest(bytes));
+    let actual = sha256_hex(bytes);
     if bytes.len() as u64 != artifact.size_bytes || !actual.eq_ignore_ascii_case(&artifact.sha256) {
         return Err(io::Error::new(
             io::ErrorKind::InvalidData,
@@ -95,8 +95,12 @@ fn verify(artifact: &Artifact, bytes: &[u8]) -> io::Result<()> {
     Ok(())
 }
 
-fn hex(bytes: &[u8]) -> String {
-    bytes.iter().map(|b| format!("{b:02x}")).collect()
+/// Lower-case hex SHA-256 of `bytes`.
+pub fn sha256_hex(bytes: &[u8]) -> String {
+    Sha256::digest(bytes)
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect()
 }
 
 fn write_one(out_dir: &Path, base: &str, extension: &str, bytes: &[u8]) -> io::Result<PathBuf> {
