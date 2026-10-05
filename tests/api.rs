@@ -834,3 +834,46 @@ fn polling_ends_on_a_status_that_is_not_retryable() {
     let err = api.wait_job(JOB_ID).unwrap_err();
     assert_eq!(err.status, Some(404));
 }
+
+#[test]
+fn an_outage_while_polling_warns_once_per_outage_and_502_504_keep_polling() {
+    let server = TestServer::start();
+    let route = format!("GET /v1/jobs/{JOB_ID}");
+    let gateway = |status: u16| Reply::status(status).body("bad gateway");
+    server
+        .on(&route, Reply::dropped())
+        .on(&route, gateway(502))
+        .on(&route, gateway(504))
+        .on(&route, Reply::golden("job-running"))
+        .on(&route, gateway(503))
+        .on(&route, Reply::dropped())
+        .on(&route, Reply::golden("job-completed"));
+    let warnings: Arc<Mutex<Vec<String>>> = Arc::default();
+    let record = warnings.clone();
+    let (api, _) = api(&server);
+    let api = api.with_warn(move |w| record.lock().unwrap().push(w.to_owned()));
+    let job = api.wait_job(JOB_ID).unwrap();
+    assert_eq!(job.state, "completed");
+    let line = format!(
+        "koldera: the server is not answering; still waiting for job {JOB_ID} (Ctrl+C to stop)"
+    );
+    assert_eq!(*warnings.lock().unwrap(), vec![line.clone(), line]);
+    for w in warnings.lock().unwrap().iter() {
+        assert!(!w.contains(&server.base) && !w.contains(TOKEN), "{w}");
+    }
+}
+
+#[test]
+fn busy_429_answers_while_polling_do_not_warn() {
+    let server = TestServer::start();
+    let route = format!("GET /v1/jobs/{JOB_ID}");
+    server
+        .on(&route, Reply::status(429).header("Retry-After", "1"))
+        .on(&route, Reply::golden("job-completed"));
+    let warnings: Arc<Mutex<Vec<String>>> = Arc::default();
+    let record = warnings.clone();
+    let (api, _) = api(&server);
+    let api = api.with_warn(move |w| record.lock().unwrap().push(w.to_owned()));
+    api.wait_job(JOB_ID).unwrap();
+    assert!(warnings.lock().unwrap().is_empty());
+}

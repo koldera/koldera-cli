@@ -47,7 +47,9 @@ pub fn host_of(url: &str) -> Option<String> {
 /// Where a failed exchange happened, which decides its exit code and hint.
 #[derive(Clone, Copy, PartialEq)]
 enum Stage {
-    /// Declaring an upload or creating the job: a 400/422 is a problem with the request itself.
+    /// Declaring an upload: a 400/422 is a problem with the request itself.
+    Declare,
+    /// Creating the job: a 400/422 is a problem with the request itself (for a document, with its content).
     Request,
     /// Any other API call.
     Api,
@@ -219,7 +221,7 @@ fn upload_input(
 fn upload(api: &Api, name: &str, content_type: &str, bytes: &[u8]) -> Result<String, Failure> {
     let ticket = api
         .create_upload(name, content_type, bytes)
-        .map_err(at(Stage::Request))?;
+        .map_err(at(Stage::Declare))?;
     api.put_upload(&ticket, bytes).map_err(at(Stage::Storage))?;
     Ok(ticket.upload_id)
 }
@@ -281,8 +283,9 @@ fn run_document(api: &Api, file: &str, stderr: &mut dyn Write) -> Result<Created
 
 /// Prints a failed exchange and returns its exit code: 64 for a request the server found invalid, else 3.
 fn report(e: &ApiError, stage: Stage, document_file: Option<&str>, stderr: &mut dyn Write) -> i32 {
-    let invalid_request = stage == Stage::Request && matches!(e.status, Some(400 | 422));
-    if invalid_request {
+    let invalid_request =
+        matches!(stage, Stage::Request | Stage::Declare) && matches!(e.status, Some(400 | 422));
+    if invalid_request && stage == Stage::Request {
         if let (Some(file), false) = (document_file, e.errors.is_empty()) {
             let _ = stderr.write_all(document::invalid_text(file, &e.errors).as_bytes());
             return exit::USAGE;

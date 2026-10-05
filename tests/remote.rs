@@ -648,3 +648,42 @@ fn only_plain_http_to_a_remote_host_warns() {
         );
     }
 }
+
+#[cfg(windows)]
+#[test]
+fn file_names_differing_only_in_case_are_one_upload_on_windows() {
+    let server = TestServer::start();
+    let tmp = tempfile::tempdir().unwrap();
+    let dir = document_dir(tmp.path());
+    let file = document(&dir, &["img/LOGO.png", "img/logo.png"]);
+    upload(&server, "33333333-3333-4333-8333-333333333333");
+    server.on(
+        "POST /v1/documents/jobs",
+        Reply::json(200, &job("document-job-prefer-wait-finished", JOB_ID)),
+    );
+    results(&server, JOB_ID, &[]);
+    let r = run(&server, &["document", &file]);
+    assert_eq!(r.code, 0, "{}", r.stderr);
+    assert_eq!(server.requests_to("POST /v1/uploads").len(), 1);
+    let sent = server.requests_to("POST /v1/documents/jobs")[0].json();
+    assert_eq!(sent["body"][1]["uploadId"], sent["body"][2]["uploadId"]);
+}
+
+#[test]
+fn an_upload_declaration_refused_for_a_document_image_is_not_an_invalid_document() {
+    let server = TestServer::start();
+    let tmp = tempfile::tempdir().unwrap();
+    let dir = document_dir(tmp.path());
+    let file = document(&dir, &["img/logo.png"]);
+    let problem = json!({"type": "about:blank", "title": "Invalid upload", "status": 422,
+        "code": "VALIDATION_ERROR", "detail": "contentType is not allowed.",
+        "errors": [{"path": "/contentType", "code": "UNSUPPORTED", "message": "Not allowed."}]});
+    server.on("POST /v1/uploads", Reply::json(422, &problem));
+    let r = run(&server, &["document", &file]);
+    assert_eq!(r.code, 64);
+    assert_eq!(
+        r.stderr,
+        "koldera: VALIDATION_ERROR: contentType is not allowed.\n  /contentType  UNSUPPORTED: Not allowed.\n"
+    );
+    assert!(server.requests_to("POST /v1/documents/jobs").is_empty());
+}
