@@ -1,7 +1,8 @@
 use std::process::ExitCode;
 
+use koldera_cli::api::Api;
 use koldera_cli::args::{self, Command};
-use koldera_cli::exit;
+use koldera_cli::{exit, remote};
 
 fn main() -> ExitCode {
     let argv: Vec<String> = std::env::args().skip(1).collect();
@@ -22,12 +23,44 @@ fn main() -> ExitCode {
             println!("{}", args::version_line());
             code(exit::OK)
         }
-        // Running jobs (remote and local) comes with the next parts of the client.
-        _ => {
-            eprintln!("koldera: running jobs is not available in this build yet");
-            code(exit::JOB_FAILED)
+        command => {
+            let server = invocation
+                .global
+                .server
+                .clone()
+                .or_else(|| std::env::var("KOLDERA_URL").ok())
+                .filter(|s| !s.is_empty());
+            match server {
+                Some(server) if !invocation.global.local => code(run_remote(&server, &command)),
+                // Local mode (the core image under Docker) comes with the next part of the client.
+                _ => {
+                    eprintln!("koldera: local mode is not available in this build yet");
+                    code(exit::JOB_FAILED)
+                }
+            }
         }
     }
+}
+
+fn run_remote(server: &str, command: &Command) -> i32 {
+    let token = std::env::var("KOLDERA_TOKEN").ok();
+    let api = match Api::new(server, token) {
+        Ok(api) => api,
+        Err(e) => {
+            eprintln!("koldera: {e}");
+            eprintln!("{}", e.usage());
+            return exit::USAGE;
+        }
+    };
+    if let Some(warning) = remote::clear_text_warning(api.base_url()) {
+        eprintln!("{warning}");
+    }
+    remote::run(
+        &api,
+        command,
+        &mut std::io::stdout().lock(),
+        &mut std::io::stderr().lock(),
+    )
 }
 
 fn code(c: i32) -> ExitCode {

@@ -2,7 +2,9 @@
 
 pub mod api;
 pub mod args;
+pub mod document;
 pub mod exit;
 pub mod model;
 pub mod output;
+pub mod remote;
 pub mod summary;
