@@ -108,8 +108,9 @@ impl ApiError {
             .into_iter()
             .filter_map(|e| serde_json::from_value::<FieldError>(e).ok())
             .map(|e| FieldError {
+                path: redact(&e.path, secrets),
                 message: redact(&e.message, secrets),
-                ..e
+                code: e.code,
             })
             .collect();
         ApiError {

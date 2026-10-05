@@ -44,6 +44,8 @@ pub struct Reply {
     pub body: Vec<u8>,
     /// Read the request, then close the connection without answering.
     pub drop: bool,
+    /// Read the request, then hold the connection open without answering.
+    pub hang: bool,
 }
 
 impl Reply {
@@ -53,6 +55,7 @@ impl Reply {
             headers: Vec::new(),
             body: Vec::new(),
             drop: false,
+            hang: false,
         }
     }
 
@@ -65,6 +68,13 @@ impl Reply {
     pub fn dropped() -> Reply {
         Reply {
             drop: true,
+            ..Reply::status(0)
+        }
+    }
+
+    pub fn hang() -> Reply {
+        Reply {
+            hang: true,
             ..Reply::status(0)
         }
     }
@@ -189,6 +199,10 @@ fn serve(stream: TcpStream, routes: &Mutex<Routes>, requests: &Mutex<Vec<Recorde
         }
     };
     let mut stream = stream;
+    if reply.hang {
+        thread::sleep(std::time::Duration::from_secs(20));
+        return;
+    }
     if reply.drop {
         let _ = stream.shutdown(Shutdown::Both);
         return;
