@@ -267,13 +267,13 @@ impl Api {
         self
     }
 
-    /// Replaces the pause between retries and polls (tests record it instead of sleeping).
     /// Replaces where waiting notices go (stderr by default; tests record them).
     pub fn with_warn(mut self, warn: impl Fn(&str) + Send + Sync + 'static) -> Api {
         self.warn = Arc::new(warn);
         self
     }
 
+    /// Replaces the pause between retries and polls (tests record it instead of sleeping).
     pub fn with_sleep(mut self, sleep: impl Fn(Duration) + Send + Sync + 'static) -> Api {
         self.sleep = Arc::new(sleep);
         self
