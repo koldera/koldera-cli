@@ -37,6 +37,7 @@ const RETRY_STEP: Duration = Duration::from_millis(250);
 const ALREADY_COMPLETED: &str = "UPLOAD_ALREADY_COMPLETED";
 
 type Sleep = Arc<dyn Fn(Duration) + Send + Sync>;
+type Warn = Arc<dyn Fn(&str) + Send + Sync>;
 
 /// A signed upload target. `upload_url` is a credential: it is never serialized or printed.
 #[derive(Clone, PartialEq, Deserialize)]
@@ -163,6 +164,7 @@ pub struct Api {
     storage: Agent,
     held_timeout: Duration,
     sleep: Sleep,
+    warn: Warn,
 }
 
 impl fmt::Debug for Api {
@@ -253,6 +255,7 @@ impl Api {
             storage: agent(STORAGE_TIMEOUT),
             held_timeout: API_TIMEOUT + Duration::from_secs(WAIT_SECONDS),
             sleep: Arc::new(std::thread::sleep),
+            warn: Arc::new(|line| eprintln!("{line}")),
         })
     }
 
@@ -265,6 +268,12 @@ impl Api {
     }
 
     /// Replaces the pause between retries and polls (tests record it instead of sleeping).
+    /// Replaces where waiting notices go (stderr by default; tests record them).
+    pub fn with_warn(mut self, warn: impl Fn(&str) + Send + Sync + 'static) -> Api {
+        self.warn = Arc::new(warn);
+        self
+    }
+
     pub fn with_sleep(mut self, sleep: impl Fn(Duration) + Send + Sync + 'static) -> Api {
         self.sleep = Arc::new(sleep);
         self
@@ -509,24 +518,40 @@ impl Api {
     }
 
     /// Polls the job until it is no longer queued or running, honouring `Retry-After` (else 1 s doubling to 5 s).
-    /// Busy answers (429/503) and transport failures keep it polling; any other non-2xx status ends it.
+    /// Busy answers (429, 502-504) and transport failures keep it polling, with one notice per outage; any other
+    /// non-2xx status ends it.
     pub fn wait_job(&self, id: &str) -> Result<Job, ApiError> {
         let path = format!("/v1/jobs/{}", escape(id));
         let mut delay = FIRST_POLL;
+        let mut outage = false;
         loop {
-            let pause = match self.exchange(&path, None, None, false) {
+            let answer = self.exchange(&path, None, None, false);
+            let down = match &answer {
+                Err(_) => true,
+                Ok(a) => matches!(a.status, 502..=504),
+            };
+            if down && !outage {
+                (self.warn)(&format!(
+                    "koldera: the server is not answering; still waiting for job {id} (Ctrl+C to stop)"
+                ));
+            }
+            if down {
+                outage = true;
+            }
+            let pause = match answer {
                 Err(_) => delay,
                 Ok(a) if a.too_large && (200..300).contains(&a.status) => {
                     return Err(ApiError::malformed(&path));
                 }
                 Ok(a) if (200..300).contains(&a.status) => {
+                    outage = false;
                     let job: Job = decode(&a, &path)?;
                     if is_terminal(&job.state) {
                         return Ok(job);
                     }
                     a.retry_after.unwrap_or(delay)
                 }
-                Ok(a) if matches!(a.status, 429 | 503) => a.retry_after.unwrap_or(delay),
+                Ok(a) if matches!(a.status, 429 | 502..=504) => a.retry_after.unwrap_or(delay),
                 Ok(a) => {
                     return Err(ApiError::problem(
                         a.status,

@@ -288,3 +288,22 @@ fn links_leading_out_are_refused_and_links_inside_are_accepted() {
     let (_, images) = document::prepare(&json).unwrap();
     assert_eq!(images[0].content_type, "image/png");
 }
+
+#[cfg(windows)]
+#[test]
+fn windows_drive_relative_and_unc_paths_are_refused_as_not_relative() {
+    let f = fixture();
+    let json = write_doc(
+        &f.dir,
+        vec![
+            image("C:logo.png"),
+            image(r"\\server\share\x.png"),
+            image("//server/share/x.png"),
+        ],
+    );
+    let errors = invalid(document::prepare(&json));
+    let expected: Vec<FieldError> = (0..3)
+        .map(|i| field(&format!("/body/{i}"), "FILE_IMAGE_INVALID", RELATIVE))
+        .collect();
+    assert_eq!(errors, expected);
+}
