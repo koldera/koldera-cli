@@ -1,0 +1,67 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  ci:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+      # The runner image ships rustup with the stable toolchain, clippy included.
+      - run: rustc --version && cargo clippy --version
+      - run: cargo test --locked
+      - run: cargo clippy --locked --all-targets -- -D warnings
+      - run: node --test scripts/check-source-hygiene.test.mjs
+      - run: node scripts/check-source-hygiene.mjs
+      - name: Vendored contracts equal sdk-contract-kit at contracts/KIT_VERSION
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          sha="$(tr -d '[:space:]' < contracts/KIT_VERSION)"
+          [[ "$sha" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::contracts/KIT_VERSION must hold a 40-character commit id"; exit 1; }
+          kit="$RUNNER_TEMP/kit"
+          expected="$RUNNER_TEMP/expected-contracts"
+          mkdir -p "$kit" "$expected"
+
+          # Public repositories can be read without a token; once sdk-contract-kit is public the check is mandatory.
+          public=false
+          if [ "$(curl -sS -o /dev/null -w '%{http_code}' https://api.github.com/repos/koldera/sdk-contract-kit)" = "200" ]; then public=true; fi
+
+          auth=()
+          if ! $public; then auth=(-H "Authorization: Bearer $GH_TOKEN"); fi
+          code="$(curl -sSL -o "$kit.tar.gz" -w '%{http_code}' "${auth[@]}" "https://api.github.com/repos/koldera/sdk-contract-kit/tarball/$sha")"
+          if [ "$code" != "200" ]; then
+            echo "fetching sdk-contract-kit at $sha returned HTTP $code"
+            if $public; then
+              echo "::error::sdk-contract-kit is public but $sha could not be fetched"
+              exit 1
+            fi
+            echo "::notice title=Contract check skipped::sdk-contract-kit is private and not readable with this workflow token. The check is enforced once the repository is public."
+            exit 0
+          fi
+
+          # contracts/ must be an exact mirror of the kit at that commit (scripts/sync-to-sdk.mjs in sdk-contract-kit).
+          tar -xzf "$kit.tar.gz" -C "$kit" --strip-components=1
+          cp -R "$kit/openapi.yaml" "$kit/document.schema.json" "$kit/problem.schema.json" "$kit/CORE_VERSION" "$kit/golden" "$expected/"
+          printf '%s\n' "$sha" > "$expected/KIT_VERSION"
+          if ! diff -ru "$expected" contracts; then
+            echo "::error::contracts/ differs from sdk-contract-kit at $sha; re-run scripts/sync-to-sdk.mjs from the kit"
+            exit 1
+          fi
