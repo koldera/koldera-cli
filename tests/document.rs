@@ -136,17 +136,11 @@ fn refused_image_paths_are_reported_with_core_codes_and_texts() {
     );
     let errors = invalid(document::prepare(&json));
     let bad = "FILE_IMAGE_INVALID";
-    let mut expected = vec![
+    // A leading backslash is refused on every platform, like core's ResolveImage.
+    let expected = vec![
         field("/body/0", bad, RELATIVE),
         field("/body/1", bad, RELATIVE),
-    ];
-    // A backslash is a separator (and so a root) only on Windows; elsewhere it is part of a missing file's name.
-    expected.push(field(
-        "/body/2",
-        bad,
-        if cfg!(windows) { RELATIVE } else { MISSING },
-    ));
-    expected.extend([
+        field("/body/2", bad, RELATIVE),
         field("/body/3", bad, OUTSIDE),
         field("/body/4", bad, OUTSIDE),
         field("/body/5", bad, MISSING),
@@ -181,7 +175,7 @@ fn refused_image_paths_are_reported_with_core_codes_and_texts() {
             "UPLOAD_ID_NOT_ALLOWED",
             "uploadId is only available over HTTP; name the image with a file path relative to the JSON file.",
         ),
-    ]);
+    ];
     assert_eq!(errors, expected);
 }
 
