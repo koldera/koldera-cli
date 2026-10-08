@@ -147,7 +147,8 @@ Environment:
   KOLDERA_TOKEN    bearer token for the server (only from the environment, never a flag)
   KOLDERA_IMAGE    Docker image for local mode
 
-Exit codes: 0 machine check passed, 2 completed with failed machine rules,
+Exit codes: 0 machine check passed or declaration_withheld (only the PDF/UA identifier
+is missing, pending human review), 2 completed with failed machine rules,
 3 job failed, unsupported or no machine verdict, 64 usage error, 130 interrupted.";
 
 /// The help text of a command, or the general help for any other name (no trailing newline).

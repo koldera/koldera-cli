@@ -11,8 +11,13 @@ pub const INTERRUPTED: i32 = 130;
 /// The job error code of a structured document whose generated PDF failed the machine check.
 pub const DOCUMENT_VALIDATION_FAILED: &str = "DOCUMENT_VALIDATION_FAILED";
 
-/// 0 only for the verdict "passed"; 2 for "failed" or any failed rule (and a document that failed validation);
-/// 3 for a job that did not complete and for a completed one without a verdict (not_run, error, missing).
+/// The verdict of a fix whose only failing check is the missing PDF/UA identifier.
+pub const DECLARATION_WITHHELD: &str = "declaration_withheld";
+
+/// 0 for the verdict "passed" and for "declaration_withheld" (only the PDF/UA identifier is missing, withheld pending
+/// human review: not a pass, and not a failure of the fix); 2 for "failed" or any other failed rule (and a document
+/// that failed validation); 3 for a job that did not complete and for a completed one without a verdict (not_run,
+/// error, missing).
 pub fn code_for(job: &Job) -> i32 {
     if job.state != "completed" {
         let document_failed = job
@@ -27,6 +32,7 @@ pub fn code_for(job: &Job) -> i32 {
     }
     match &job.validation {
         None => JOB_FAILED,
+        Some(v) if v.status == DECLARATION_WITHHELD => OK,
         Some(v) if v.status == "failed" || !v.failed_rules.is_empty() => FAILED_RULES,
         Some(v) if v.status == "passed" => OK,
         Some(_) => JOB_FAILED,
