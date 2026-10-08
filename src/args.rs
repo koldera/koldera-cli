@@ -3,9 +3,6 @@
 
 use std::fmt;
 
-/// The core image local mode starts when neither `--image` nor `KOLDERA_IMAGE` names one.
-pub const DEFAULT_IMAGE: &str = "ghcr.io/koldera/core:0.1.0";
-
 pub const COMMANDS: [&str; 4] = ["pdf", "html", "scan", "document"];
 
 pub const GENERAL_USAGE: &str = "\
@@ -143,7 +140,7 @@ Commands:
 Global options (before or after the command):
   --server <url>   run the job on this koldera-core server (default: KOLDERA_URL)
   --local          run the job in the koldera-core Docker image, even when KOLDERA_URL is set
-  --image <ref>    Docker image for local mode (default: KOLDERA_IMAGE, else ghcr.io/koldera/core:0.1.0)
+  --image <ref>    Docker image for local mode (default: KOLDERA_IMAGE)
 
 Environment:
   KOLDERA_URL      server to use; without it (or with --local) jobs run locally in Docker
