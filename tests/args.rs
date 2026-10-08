@@ -405,7 +405,6 @@ fn general_help_lists_commands_global_options_environment_and_exit_codes() {
         "--server <url>",
         "--local",
         "--image <ref>",
-        args::DEFAULT_IMAGE,
         "KOLDERA_URL",
         "KOLDERA_TOKEN",
         "KOLDERA_IMAGE",
