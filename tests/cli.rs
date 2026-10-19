@@ -81,21 +81,30 @@ fn koldera_with(args: &[&str], env: &[(&str, &str)]) -> Output {
 }
 
 #[test]
-fn without_a_server_local_mode_is_not_available_yet() {
+fn a_server_is_required_and_local_mode_is_rejected() {
     let o = koldera(&["scan", "https://example.com/"]);
-    assert_eq!(o.status.code(), Some(3));
+    assert_eq!(o.status.code(), Some(64));
     assert_eq!(
         stderr(&o),
-        "koldera: local mode is not available in this build yet\n"
+        "koldera: set --server or KOLDERA_URL to connect to koldera-core\n"
     );
     let o = koldera_with(
         &["--local", "scan", "https://example.com/"],
         &[("KOLDERA_URL", "http://127.0.0.1:9")],
     );
-    assert_eq!(o.status.code(), Some(3));
+    assert_eq!(o.status.code(), Some(64));
     assert_eq!(
         stderr(&o),
-        "koldera: local mode is not available in this build yet\n"
+        "koldera: local Docker mode is not implemented; use --server or KOLDERA_URL\n"
+    );
+    let o = koldera_with(
+        &["--image", "koldera-core:0.1.0", "scan", "https://example.com/"],
+        &[("KOLDERA_URL", "http://127.0.0.1:9")],
+    );
+    assert_eq!(o.status.code(), Some(64));
+    assert_eq!(
+        stderr(&o),
+        "koldera: local Docker mode is not implemented; use --server or KOLDERA_URL\n"
     );
 }
 
