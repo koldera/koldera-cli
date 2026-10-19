@@ -2,7 +2,8 @@
 
 `koldera` runs accessibility jobs against a Koldera Core server from a terminal or a script. It can analyze or repair a PDF, render HTML or a structured document to a tagged PDF, and scan one web page. The CLI uses the Core HTTP API; it does not include the Core server or a local PDF engine.
 
-**Status:** source preview for the 0.1 API. No CLI binary or package has been released yet. Koldera Core is separately licensed, self-hosted software; you need access to a running Core instance and a server token.
+**Status:** source preview for the 0.1 API. No CLI binary or package has been released yet. Koldera Core is an
+AGPL-3.0-only, self-hosted server; you need a running Core instance and a server token.
 
 Automated PDF/UA and web checks do not establish that a document or page is accessible. Review the findings and the output with a person before making a conformance claim.
 
@@ -59,10 +60,14 @@ node scripts/check-source-hygiene.mjs
 
 The tests use synthetic files and recorded HTTP fixtures; a Core deployment is not needed. To run the optional live smoke test, set `KOLDERA_URL` and `KOLDERA_TOKEN`, then run `node scripts/e2e-live.mjs`.
 
-[`contracts/`](contracts) is a vendored copy of the shared API contract. `contracts/CORE_VERSION` identifies the private Core source revision and `contracts/KIT_VERSION` identifies the [`sdk-contract-kit`](https://github.com/koldera/sdk-contract-kit) revision used to update the copy.
+[`contracts/`](contracts) is a vendored copy of the shared API contract. `contracts/CORE_VERSION` identifies the
+[Core](https://github.com/koldera/koldera-core) source revision and `contracts/KIT_VERSION` identifies the
+[`sdk-contract-kit`](https://github.com/koldera/sdk-contract-kit) revision used to update the copy.
 
 ## Licence and support
 
-This CLI is licensed under [Apache-2.0](LICENSE). Koldera Core is a separate, commercially licensed product; the CLI licence does not grant a Core licence. For Core access, write to `licensing@koldera-accessibility.dev`.
+This CLI is licensed under [Apache-2.0](LICENSE). Koldera Core is a separate server licensed under
+[AGPL-3.0-only](https://github.com/koldera/koldera-core/blob/main/LICENSE). You can build and run Core from its source;
+follow the terms of its licence when using or modifying it.
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for changes and [SECURITY.md](SECURITY.md) for private vulnerability reports. Do not put credentials, documents or signed download URLs in a public issue.
