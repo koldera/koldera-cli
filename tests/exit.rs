@@ -40,6 +40,8 @@ fn verdicts_of_completed_jobs() {
     assert_eq!(code_for(&with_validation("failed", 1)), 2);
     // Failed rules count even when the status claims passed.
     assert_eq!(code_for(&with_validation("passed", 1)), 2);
+    // Only the PDF/UA identifier is missing: not a pass, but not a failed fix either (same as core's command line).
+    assert_eq!(code_for(&with_validation("declaration_withheld", 1)), 0);
     assert_eq!(code_for(&with_validation("not_run", 0)), 3);
     assert_eq!(code_for(&with_validation("error", 0)), 3);
     assert_eq!(code_for(&with_validation("something_new", 0)), 3);
@@ -52,6 +54,14 @@ fn verdicts_of_completed_jobs() {
 fn golden_jobs() {
     assert_eq!(code_for(&common::job("job-completed")), 2);
     assert_eq!(code_for(&common::job("job-completed-fix")), 0);
+    assert_eq!(
+        code_for(&common::job("job-completed-fix-declaration-withheld")),
+        0
+    );
+    assert_eq!(
+        code_for(&common::job("job-completed-document-declaration-withheld")),
+        0
+    );
     assert_eq!(code_for(&common::job("job-failed")), 3);
     assert_eq!(
         code_for(&common::job("document-job-prefer-wait-finished")),

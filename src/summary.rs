@@ -4,6 +4,7 @@ use std::fmt::Write as _;
 
 use serde::Serialize;
 
+use crate::exit::DECLARATION_WITHHELD;
 use crate::model::{Action, Finding, Job, Validation};
 use crate::output::Written;
 
@@ -33,6 +34,14 @@ pub fn text(job: &Job, findings: &[Finding], actions: &[Action], written: &[Writ
                 &mut s,
                 format_args!("{label} machine check: {}", describe(v)),
             );
+            if v.status == DECLARATION_WITHHELD {
+                line(
+                    &mut s,
+                    format_args!(
+                        "  The PDF/UA identifier (pdfuaid) was not written: declaring PDF/UA requires a human review. This is not a pass."
+                    ),
+                );
+            }
             // A fix has a before and an after; show the starting point when it differs.
             if let (Some(b), Some(_)) = (&job.baseline_validation, &job.final_validation) {
                 if describe(b) != describe(v) {

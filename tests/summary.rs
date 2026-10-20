@@ -59,6 +59,24 @@ fn text_for_a_pdf_fix_job() {
 }
 
 #[test]
+fn text_for_a_withheld_declaration_says_it_is_not_a_pass() {
+    let job = common::job("job-completed-fix-declaration-withheld");
+    let text = summary::text(&job, &[], &[], &[]);
+    assert!(
+        text.contains(
+            "PDF/UA-1 machine check: declaration_withheld (1 rule failed: ISO 14289-1:2014 5-1 x1)
+"
+        ),
+        "{text}"
+    );
+    assert!(
+        text.contains("The PDF/UA identifier (pdfuaid) was not written: declaring PDF/UA requires a human review. This is not a pass.
+"),
+        "{text}"
+    );
+}
+
+#[test]
 fn text_for_an_analyze_job_has_no_before_line_and_no_remediation_line() {
     let job = common::job("job-completed");
     let text = summary::text(&job, &[], &[], &[]);
