@@ -407,7 +407,7 @@ fn general_help_lists_commands_global_options_environment_and_exit_codes() {
         "--image <ref>",
         "KOLDERA_URL",
         "KOLDERA_TOKEN",
-        "KOLDERA_IMAGE",
+        "local Docker mode is not implemented",
         "Exit codes: 0 machine check passed or declaration_withheld (only the PDF/UA identifier\n\
          is missing, pending human review), 2 completed with failed machine rules,\n\
          3 job failed, unsupported or no machine verdict, 64 usage error, 130 interrupted.",

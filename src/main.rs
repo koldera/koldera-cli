@@ -30,12 +30,15 @@ fn main() -> ExitCode {
                 .clone()
                 .or_else(|| std::env::var("KOLDERA_URL").ok())
                 .filter(|s| !s.is_empty());
+            if invocation.global.local || invocation.global.image.is_some() {
+                eprintln!("koldera: local Docker mode is not implemented; use --server or KOLDERA_URL");
+                return code(exit::USAGE);
+            }
             match server {
-                Some(server) if !invocation.global.local => code(run_remote(&server, &command)),
-                // Local mode (the core image under Docker) comes with the next part of the client.
-                _ => {
-                    eprintln!("koldera: local mode is not available in this build yet");
-                    code(exit::JOB_FAILED)
+                Some(server) => code(run_remote(&server, &command)),
+                None => {
+                    eprintln!("koldera: set --server or KOLDERA_URL to connect to koldera-core");
+                    code(exit::USAGE)
                 }
             }
         }

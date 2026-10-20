@@ -139,13 +139,14 @@ Commands:
 
 Global options (before or after the command):
   --server <url>   run the job on this koldera-core server (default: KOLDERA_URL)
-  --local          run the job in the koldera-core Docker image, even when KOLDERA_URL is set
-  --image <ref>    Docker image for local mode (default: KOLDERA_IMAGE)
+  --local          reserved; local Docker mode is not implemented
+  --image <ref>    reserved; local Docker mode is not implemented
 
 Environment:
-  KOLDERA_URL      server to use; without it (or with --local) jobs run locally in Docker
+  KOLDERA_URL      server to use; required unless --server is given
   KOLDERA_TOKEN    bearer token for the server (only from the environment, never a flag)
-  KOLDERA_IMAGE    Docker image for local mode
+
+This client calls a running koldera-core server. Use the core image's own CLI for local jobs.
 
 Exit codes: 0 machine check passed or declaration_withheld (only the PDF/UA identifier
 is missing, pending human review), 2 completed with failed machine rules,

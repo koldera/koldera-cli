@@ -1,0 +1,9 @@
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "Synthetic session token in golden fixtures; its payload decodes to {\"fake\":\"true\"}"
+regexTarget = "match"
+regexes = [
+  '''v1\.eyJmYWtlIjoidHJ1ZSJ9\.ZmFrZS1zaWduYXR1cmU''',
+]
